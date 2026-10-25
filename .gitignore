@@ -8,3 +8,4 @@ __pycache__/
 market_data.db
 .vscode/
 .env
+pyrefly.toml
