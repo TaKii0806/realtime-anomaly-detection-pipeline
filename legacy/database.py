@@ -49,13 +49,9 @@ def get_latest_id() -> int:
         cursor = conn.cursor()
         cursor.execute("SELECT MAX(id) FROM transactions")
         val = cursor.fetchone()
-        if val and val[0] is None:
+        if val[0] is not None:
             return val[0]
-        return 0
+        else:
+            return 0
 if __name__ == "__main__":
     init_db()
-
-    print("\n--5 LATEST TRANSACTION IN DATABASE--")
-    recent_data = get_recent_transaction()
-    for row in recent_data:
-        print(row)
