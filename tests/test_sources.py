@@ -2,8 +2,9 @@ import asyncio
 import json
 from pipeline.sources import ReplaySource
 
+
 def test_replay_source_reads_all_lines(tmp_path):
-    """ReplaySource đọc đầy đủ các dòng JSON từ file và chuyển thành dict."""
+    """Verify that ReplaySource reads all JSON lines from file and parses them into dicts."""
     sample_file = tmp_path / "sample.jsonl"
     lines = [
         {"e": "trade", "t": 1, "p": "80000.0"},
@@ -23,8 +24,9 @@ def test_replay_source_reads_all_lines(tmp_path):
     assert collected[1]["p"] == "80010.0"
     assert collected[2]["t"] == 3
 
+
 def test_replay_source_ignores_empty_lines(tmp_path):
-    """ReplaySource bỏ qua các dòng rỗng hoặc khoảng trắng thừa."""
+    """Verify that ReplaySource ignores blank lines and whitespace-only lines."""
     sample_file = tmp_path / "sample_with_blanks.jsonl"
     content = '{"e": "trade", "t": 1}\n\n   \n{"e": "trade", "t": 2}\n\n'
     sample_file.write_text(content, encoding="utf-8")

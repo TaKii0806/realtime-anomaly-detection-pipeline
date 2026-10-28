@@ -122,17 +122,21 @@ async def batcher(
 
     async def _flush() -> None:
         nonlocal last_flush_time
+        last_flush_time = loop.time()
         if not batch:
             return
         await sink.write(batch)
         stats.written += len(batch)
         batch.clear()
-        last_flush_time = loop.time()
 
     try:
         while True:
             elapsed = loop.time() - last_flush_time
-            remaining_timeout = max(0.0, flush_interval_s - elapsed)
+            if elapsed >= flush_interval_s:
+                await _flush()
+                elapsed = 0.0
+
+            remaining_timeout = max(0.05, flush_interval_s - elapsed)
 
             try:
                 item = await asyncio.wait_for(queue.get(), timeout=remaining_timeout)
@@ -148,7 +152,7 @@ async def batcher(
             batch.append(item)
             queue.task_done()
 
-            if len(batch) >= batch_size:
+            if len(batch) >= batch_size or (loop.time() - last_flush_time >= flush_interval_s):
                 await _flush()
     finally:
         await _flush()

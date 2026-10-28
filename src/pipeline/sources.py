@@ -1,40 +1,47 @@
 import asyncio
 import json
+import logging
+import random
 from pathlib import Path
 from typing import AsyncIterator
-import random
+
+logger = logging.getLogger(__name__)
+
 
 class ReplaySource:
-    # Nguồn phát lại dữ liệu từ file JSONL trên đĩa cứng
-    def __init__(self, file_path:str | Path, speed:float=0.0):
+    """Replays raw JSONL trade records from local disk."""
+
+    def __init__(self, file_path: str | Path, speed: float = 0.0) -> None:
         self.file_path = Path(file_path)
         self.speed = speed
-    
+
     async def stream(self) -> AsyncIterator[dict]:
         with open(self.file_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
-                lines = json.loads(line)
-                if (self.speed > 0):
+                record = json.loads(line)
+                if self.speed > 0:
                     await asyncio.sleep(self.speed)
-                yield lines
+                yield record
+
 
 class BinanceWebSocketSource:
-    # Nguồn nhận luồng giao dịch real-time từ Binance WebSocket + auto reconnect
-    def __init__ (
+    """Streams live trade data from Binance WebSocket with exponential backoff and jitter."""
+
+    def __init__(
         self,
-        url:str="wss://stream.binance.com:9443/ws/btcusdt@trade",
-        max_retries:int=5,
-        initial_backoff_s:float=1.0,
-        max_backoff_s:float=30.0
-    ):
+        url: str = "wss://stream.binance.com:9443/ws/btcusdt@trade",
+        max_retries: int = 5,
+        initial_backoff_s: float = 1.0,
+        max_backoff_s: float = 30.0,
+    ) -> None:
         self.url = url
         self.max_retries = max_retries
         self.initial_backoff_s = initial_backoff_s
         self.max_backoff_s = max_backoff_s
-    
+
     async def stream(self) -> AsyncIterator[dict]:
         import websockets
 
@@ -42,10 +49,9 @@ class BinanceWebSocketSource:
         back_off = self.initial_backoff_s
         while retries < self.max_retries:
             try:
-                print(f"Đang kết nối tới {self.url}...")
+                logger.info("Connecting to %s...", self.url)
                 async with websockets.connect(self.url) as ws:
-                    print("Kết nối thành công! Đang ghi lại...")
-
+                    logger.info("Connected successfully. Streaming trade events...")
                     retries = 0
                     back_off = self.initial_backoff_s
 
@@ -57,11 +63,17 @@ class BinanceWebSocketSource:
             except Exception as e:
                 retries += 1
                 if retries >= self.max_retries:
-                    print(f"Đã thử {retries} lần nhưng thất bại. Dừng kết nối: {e}")
+                    logger.error("Connection failed after %d retries: %s", retries, e)
                     raise
 
                 jitter = random.uniform(0, 0.5)
                 sleep_time = min(back_off, self.max_backoff_s) + jitter
-                print(f"Mất kết nối ({e}), thử lại lần {retries}/{self.max_retries} sau {sleep_time:.2f}s...")
+                logger.warning(
+                    "Connection lost (%s). Retrying %d/%d after %.2fs...",
+                    e,
+                    retries,
+                    self.max_retries,
+                    sleep_time,
+                )
                 await asyncio.sleep(sleep_time)
                 back_off *= 2

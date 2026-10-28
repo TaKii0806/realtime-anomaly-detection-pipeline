@@ -27,7 +27,7 @@ def parse_trade(raw:dict, *, expected_symbol:str="BTCUSDT", now_ms:int | None = 
     if price <= 0 or quantity <= 0:
         raise ValidationError("Price and quantity must be positive")
     if now_ms is not None:
-        if trade_time_ms > now_ms + 5000:  # Lệch tương lai quá 5 giây
+        if trade_time_ms > now_ms + 5000:
             raise ValidationError("Trade time is in the future")
 
     return Trade(expected_symbol, trade_id, price, quantity, trade_time_ms, is_buyer_maker)
