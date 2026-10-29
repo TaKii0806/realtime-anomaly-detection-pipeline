@@ -2,9 +2,14 @@ import argparse
 import asyncio
 import logging
 import sys
+import os
 
+from dotenv import load_dotenv
 from pipeline.runner import JsonlSink, PipelineStats, batcher, receiver
 from pipeline.sources import BinanceWebSocketSource, ReplaySource
+from pipeline.storage.repository import PostgresSink, PostgresTradeRepository, PostgresRejectedSink
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,8 +38,6 @@ async def run_pipeline(
     file_path: str = "data/raw/btcusdt_raw.jsonl",
     speed: float = 1.0,
     symbol: str = "BTCUSDT",
-    out_file: str = "data/raw/btcusdt_ingested.jsonl",
-    rejected_file: str = "data/raw/btcusdt_rejected.jsonl",
     batch_size: int = 500,
     flush_interval_s: float = 1.0,
     minutes: float | None = None,
@@ -44,6 +47,9 @@ async def run_pipeline(
     buffers through a bounded queue, flushes batches via batcher to sinks,
     and guarantees a clean shutdown on completion or cancellation.
     """
+    DB_CONN = os.getenv('DATABASE_URL')
+    if not DB_CONN:
+        raise ValueError ("DATABASE_URL is not set. Please define it in your .env file or system environment.")
     # 1. Initialize data source
     if source_type == "binance":
         source = BinanceWebSocketSource()
@@ -55,8 +61,9 @@ async def run_pipeline(
         raise ValueError(f"Unknown source type: {source_type}")
 
     # 2. Initialize sinks, shared queue, and metrics collector
-    sink = JsonlSink(out_file)
-    rejected_sink = JsonlSink(rejected_file)
+    repo = PostgresTradeRepository(DB_CONN)
+    sink = PostgresSink(repo)
+    rejected_sink = PostgresRejectedSink(repo)
     queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
     stats = PipelineStats()
 
@@ -139,18 +146,6 @@ def parse_args() -> argparse.Namespace:
         help="Trading pair symbol to filter (default: BTCUSDT)",
     )
     parser.add_argument(
-        "--out",
-        type=str,
-        default="data/raw/btcusdt_ingested.jsonl",
-        help="Output path for valid ingested records",
-    )
-    parser.add_argument(
-        "--rejected-out",
-        type=str,
-        default="data/raw/btcusdt_rejected.jsonl",
-        help="Output path for unparseable rejected events",
-    )
-    parser.add_argument(
         "--batch-size",
         type=int,
         default=500,
@@ -181,8 +176,6 @@ def main() -> None:
                 file_path=args.file,
                 speed=args.speed,
                 symbol=args.symbol,
-                out_file=args.out,
-                rejected_file=args.rejected_out,
                 batch_size=args.batch_size,
                 flush_interval_s=args.flush_interval,
                 minutes=args.minutes,

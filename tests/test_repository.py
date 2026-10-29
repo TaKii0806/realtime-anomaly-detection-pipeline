@@ -97,4 +97,26 @@ def test_postgres_sink_writes_batches():
     assert repo.count("BTCUSDT") == 2
 
 
+def test_insert_rejected_records():
+    """Verify that insert_rejected persists malformed events into raw.rejected_events."""
+    import psycopg
+
+    repo = PostgresTradeRepository(DB_CONN)
+    items = [
+        {"reason": "Price must be positive", "raw": {"p": "-10.0"}},
+        {"reason": "Unparseable line", "raw": "MALFORMED_LINE_DATA"},
+    ]
+
+    repo.insert_rejected(items)
+
+    with psycopg.connect(DB_CONN) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM raw.rejected_events;")
+            count = cur.fetchone()[0]
+            assert count >= 2
+            # Clean up
+            cur.execute("DELETE FROM raw.rejected_events;")
+
+
+
 

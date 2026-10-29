@@ -4,6 +4,8 @@ import time
 from typing import Sequence, Any
 import psycopg
 from pipeline.models import Trade
+from psycopg.types.json import Jsonb
+import json
 
 class PostgresTradeRepository:
     #Repository handling database operations for raw trades in PostgreSQL
@@ -31,6 +33,24 @@ class PostgresTradeRepository:
             with conn.cursor() as cur:
                 cur.executemany(sql, params)
                 return cur.rowcount
+    
+    def insert_rejected(self, items: Sequence[Any]):
+        #Insert rejected trades in to raw.rejected_events
+        if not items:
+            return
+        now_ms = int(time.time() * 1000)
+
+        sql = """
+        INSERT INTO raw.rejected_events(received_at_ms, reason, raw_payload)
+        VALUES (%s, %s, %s::jsonb)
+        """
+        with psycopg.connect(self.conn_info) as conn:
+            with conn.cursor() as cur:
+                for item in items:
+                    reason = item.get("reason", "Unknown validation error")
+                    raw_val = item.get("raw", {})
+                    raw_json = json.dumps(raw_val) if isinstance(raw_val, (dict, list)) else json.dumps({"raw": str(raw_val)})
+                    cur.execute(sql, (now_ms, reason, raw_json))
 
     def count(self, symbol:str) -> int:
         #Return total count of trades for the given symbol
@@ -40,6 +60,7 @@ class PostgresTradeRepository:
                 row = cur.fetchone()
                 return row[0] if row else 0
     
+
     def fetch_since(self, symbol:str, since_ms:int, limit:int=1000) -> list[Trade]:
         with psycopg.connect(self.conn_info) as conn:
             with conn.cursor() as cur:
@@ -47,14 +68,15 @@ class PostgresTradeRepository:
                 SELECT symbol, trade_id, price, quantity, trade_time_ms, is_buyer_maker
                 FROM raw.trades
                 WHERE symbol = %s and trade_time_ms >= %s
+                ORDER BY trade_time_ms ASC
                 LIMIT %s
                 """, (symbol, since_ms, limit))
                 row = cur.fetchall()
                 return [Trade(
                 symbol=r[0],
                 trade_id = r[1], 
-                price = r[2], 
-                quantity = r[3], 
+                price = float(r[2]), 
+                quantity = float(r[3]), 
                 trade_time_ms=r[4], 
                 is_buyer_maker=r[5]
                 ) for r in row]
@@ -68,3 +90,12 @@ class PostgresSink:
         if not items:
             return
         await asyncio.to_thread(self.repo.insert_many, items)
+
+class PostgresRejectedSink:
+    def __init__(self, repo: PostgresTradeRepository) -> None:
+        self.repo = repo
+
+    async def write(self, items: Sequence[Any]) -> None:
+        if not items:
+            return
+        await asyncio.to_thread(self.repo.insert_rejected, items)
