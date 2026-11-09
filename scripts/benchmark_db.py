@@ -95,7 +95,7 @@ def benchmark_query_with_explain() -> None:
             )
             conn.commit()
 
-    query = f"""
+    query = """
     EXPLAIN (ANALYZE, BUFFERS)
     SELECT 
         symbol,
@@ -104,21 +104,22 @@ def benchmark_query_with_explain() -> None:
         AVG(price) AS avg_price,
         COUNT(*) AS total_trades
     FROM raw.trades
-    WHERE symbol = 'BTC_BENCH' AND trade_time_ms BETWEEN {now_ms} AND {now_ms + 100000}
+    WHERE symbol = %s AND trade_time_ms BETWEEN %s AND %s
     GROUP BY symbol;
     """
+    params = ("BTC_BENCH", now_ms, now_ms + 100000)
 
     with psycopg.connect(DB_CONN) as conn:
         with conn.cursor() as cur:
             # Lần 1: Ép tắt Index Scan -> Ép dùng Sequential Scan
             cur.execute("SET enable_indexscan = off; SET enable_bitmapscan = off;")
-            cur.execute(query)
+            cur.execute(query, params)
             plan_seq = "\n".join([row[0] for row in cur.fetchall()])
             print("\n[PLAN 1: SEQUENTIAL SCAN (TAT INDEX)]:\n" + plan_seq)
 
             # Lần 2: Bật lại Index Scan
             cur.execute("SET enable_indexscan = on; SET enable_bitmapscan = on;")
-            cur.execute(query)
+            cur.execute(query, params)
             plan_idx = "\n".join([row[0] for row in cur.fetchall()])
             print("\n[PLAN 2: INDEX SCAN (CO B-TREE INDEX)]:\n" + plan_idx)
 
@@ -130,3 +131,4 @@ def benchmark_query_with_explain() -> None:
 if __name__ == "__main__":
     benchmark_insert(num_records=5000)
     benchmark_query_with_explain()
+

@@ -4,7 +4,6 @@ import time
 from typing import Sequence, Any
 import psycopg
 from pipeline.models import Trade
-from psycopg.types.json import Jsonb
 import json
 
 class PostgresTradeRepository:
