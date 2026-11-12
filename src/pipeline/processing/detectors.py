@@ -51,3 +51,4 @@ class RollingZScoreDetector:
                 alert = Alert(bar.symbol, alert_type, "WARNING", z_score, self.threshold, bar.bar_start_ms, created_ms)
         history.append(bar.close)
         return alert
+
