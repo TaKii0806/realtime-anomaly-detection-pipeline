@@ -12,9 +12,12 @@ DB_CONN = os.getenv(
 )
 
 
+TEST_SYMBOL = "TESTREPO"
+
+
 def _make_trade(trade_id: int, price: float = 85000.0) -> Trade:
     return Trade(
-        symbol="BTCUSDT",
+        symbol=TEST_SYMBOL,
         trade_id=trade_id,
         price=price,
         quantity=0.05,
@@ -25,18 +28,18 @@ def _make_trade(trade_id: int, price: float = 85000.0) -> Trade:
 
 @pytest.fixture(autouse=True)
 def clean_trades_table():
-    """Clean up raw.trades table before and after each test."""
+    """Clean up TESTREPO rows in raw.trades before and after each test."""
     import psycopg
 
     with psycopg.connect(DB_CONN) as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM raw.trades WHERE symbol = 'BTCUSDT'")
+            cur.execute("DELETE FROM raw.trades WHERE symbol = %s;", (TEST_SYMBOL,))
 
     yield
 
     with psycopg.connect(DB_CONN) as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM raw.trades WHERE symbol = 'BTCUSDT'")
+            cur.execute("DELETE FROM raw.trades WHERE symbol = %s;", (TEST_SYMBOL,))
 
 
 def test_insert_many_inserts_records():
@@ -47,7 +50,7 @@ def test_insert_many_inserts_records():
     inserted = repo.insert_many(trades)
 
     assert inserted == 3
-    assert repo.count("BTCUSDT") == 3
+    assert repo.count(TEST_SYMBOL) == 3
 
 
 def test_insert_many_is_idempotent():
@@ -58,12 +61,12 @@ def test_insert_many_is_idempotent():
     # First insert: 2 rows inserted
     inserted_1 = repo.insert_many(trades)
     assert inserted_1 == 2
-    assert repo.count("BTCUSDT") == 2
+    assert repo.count(TEST_SYMBOL) == 2
 
     # Second insert with exact same trades: 0 rows inserted, count remains 2
     inserted_2 = repo.insert_many(trades)
     assert inserted_2 == 0
-    assert repo.count("BTCUSDT") == 2
+    assert repo.count(TEST_SYMBOL) == 2
 
 
 def test_insert_many_empty_list():
@@ -79,7 +82,7 @@ def test_fetch_since_returns_ordered_trades():
     t2 = _make_trade(2, 85100.0)
     repo.insert_many([t1, t2])
 
-    trades = repo.fetch_since("BTCUSDT", since_ms=1700000000002)
+    trades = repo.fetch_since(TEST_SYMBOL, since_ms=1700000000002)
     assert len(trades) == 1
     assert trades[0].trade_id == 2
 
@@ -94,7 +97,7 @@ def test_postgres_sink_writes_batches():
     trades = [_make_trade(20), _make_trade(21)]
 
     asyncio.run(sink.write(trades))
-    assert repo.count("BTCUSDT") == 2
+    assert repo.count(TEST_SYMBOL) == 2
 
 
 def test_insert_rejected_records():
@@ -103,19 +106,19 @@ def test_insert_rejected_records():
 
     repo = PostgresTradeRepository(DB_CONN)
     items = [
-        {"reason": "Price must be positive", "raw": {"p": "-10.0"}},
-        {"reason": "Unparseable line", "raw": "MALFORMED_LINE_DATA"},
+        {"reason": f"[{TEST_SYMBOL}] Price must be positive", "raw": {"p": "-10.0"}},
+        {"reason": f"[{TEST_SYMBOL}] Unparseable line", "raw": "MALFORMED_LINE_DATA"},
     ]
 
     repo.insert_rejected(items)
 
     with psycopg.connect(DB_CONN) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM raw.rejected_events;")
-            count = cur.fetchone()[0]
-            assert count >= 2
-            # Clean up
-            cur.execute("DELETE FROM raw.rejected_events;")
+            cur.execute("SELECT COUNT(*) FROM raw.rejected_events WHERE reason LIKE %s;", (f"[{TEST_SYMBOL}]%",))
+            row = cur.fetchone()
+            assert row is not None and row[0] == 2
+            # Clean up only test rows
+            cur.execute("DELETE FROM raw.rejected_events WHERE reason LIKE %s;", (f"[{TEST_SYMBOL}]%",))
 
 
 

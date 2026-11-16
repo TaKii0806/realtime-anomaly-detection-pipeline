@@ -86,9 +86,9 @@ def test_stored_procedure_maintain_raw_trades():
     with psycopg.connect(DB_CONN) as conn:
         with conn.cursor() as cur:
             symbol = "TEST_MAINTAIN"
-            # Insert 1 old trade (30 days ago) and 1 fresh trade (now)
+            # Insert 1 very old trade (400 days ago) and 1 fresh trade (now)
             now_ms = int(time.time() * 1000)
-            old_ms = now_ms - (30 * 24 * 60 * 60 * 1000)
+            old_ms = now_ms - (400 * 24 * 60 * 60 * 1000)
 
             cur.execute(
                 """
@@ -100,8 +100,8 @@ def test_stored_procedure_maintain_raw_trades():
                 (symbol, old_ms, old_ms, symbol, now_ms, now_ms),
             )
 
-            # Call stored procedure with retention 7 days -> old trade should be deleted
-            cur.execute("CALL ops.sp_maintain_raw_trades(7);")
+            # Call stored procedure with retention 365 days -> only 400-day-old trade is deleted (safe for recent BTCUSDT)
+            cur.execute("CALL ops.sp_maintain_raw_trades(365);")
 
             # Check that only the fresh trade remains
             cur.execute("SELECT trade_id FROM raw.trades WHERE symbol = %s;", (symbol,))

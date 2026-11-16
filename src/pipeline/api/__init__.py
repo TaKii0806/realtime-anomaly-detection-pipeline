@@ -1,0 +1,1 @@
+"""FastAPI service package for querying market trades, OHLCV bars, alerts, and pipeline stats."""
