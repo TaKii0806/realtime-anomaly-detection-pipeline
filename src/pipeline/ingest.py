@@ -3,11 +3,13 @@ import asyncio
 import logging
 import sys
 import os
+from confluent_kafka import Producer
 
 from dotenv import load_dotenv
 from pipeline.runner import JsonlSink, PipelineStats, batcher, receiver
 from pipeline.sources import BinanceWebSocketSource, ReplaySource
 from pipeline.storage.repository import PostgresSink, PostgresTradeRepository, PostgresRejectedSink
+from pipeline.streaming.kafka_sink import KafkaDlqSink, KafkaTradeSink
 
 load_dotenv()
 
@@ -41,15 +43,15 @@ async def run_pipeline(
     batch_size: int = 500,
     flush_interval_s: float = 1.0,
     minutes: float | None = None,
+    sink_type: str = 'postgres',
+    kafka_bootstrap:str = "localhost:9092"
 ) -> None:
     """
     Orchestrates the ingestion pipeline: connects source to receiver,
     buffers through a bounded queue, flushes batches via batcher to sinks,
     and guarantees a clean shutdown on completion or cancellation.
     """
-    DB_CONN = os.getenv('DATABASE_URL')
-    if not DB_CONN:
-        raise ValueError ("DATABASE_URL is not set. Please define it in your .env file or system environment.")
+
     # 1. Initialize data source
     if source_type == "binance":
         source = BinanceWebSocketSource()
@@ -61,9 +63,19 @@ async def run_pipeline(
         raise ValueError(f"Unknown source type: {source_type}")
 
     # 2. Initialize sinks, shared queue, and metrics collector
-    repo = PostgresTradeRepository(DB_CONN)
-    sink = PostgresSink(repo)
-    rejected_sink = PostgresRejectedSink(repo)
+    if sink_type == 'postgres':
+        DB_CONN = os.getenv('DATABASE_URL')
+        if not DB_CONN:
+            raise ValueError ("DATABASE_URL is not set. Please define it in your .env file or system environment.")
+        repo = PostgresTradeRepository(DB_CONN)
+        sink = PostgresSink(repo)
+        rejected_sink = PostgresRejectedSink(repo)
+    elif sink_type == 'kafka':
+        producer= Producer({"bootstrap.servers": kafka_bootstrap})
+        sink = KafkaTradeSink(bootstrap_servers=kafka_bootstrap, producer=producer)
+        rejected_sink=KafkaDlqSink(bootstrap_servers=kafka_bootstrap, producer=producer)
+    else:
+        raise ValueError('Sink type must be "postgres" or "kafka!"')
     queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
     stats = PipelineStats()
 
@@ -163,6 +175,16 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional auto-stop runtime in minutes",
     )
+    parser.add_argument(
+        "--sink",
+        choices=["postgres", "kafka"],
+        default="postgres",
+        help="Choose sink (default: postgres)"
+    )
+    parser.add_argument(
+        "--kafka-bootstrap",
+        default=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    )
     return parser.parse_args()
 
 
@@ -179,6 +201,8 @@ def main() -> None:
                 batch_size=args.batch_size,
                 flush_interval_s=args.flush_interval,
                 minutes=args.minutes,
+                sink_type=args.sink,
+                kafka_bootstrap=args.kafka_bootstrap
             )
         )
     except KeyboardInterrupt:
